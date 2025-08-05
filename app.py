@@ -1,13 +1,13 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pandas as pd
 import os
 
-# Crear la aplicación Flask
+# Crear la app Flask
 app = Flask(__name__)
 CORS(app)
 
-# Ruta del archivo Excel
+# Ruta al archivo Excel
 EXCEL_PATH = os.path.join("data", "Rutas_Completas_Principios_Contexto_Formato.xlsx")
 
 @app.route("/")
@@ -24,20 +24,20 @@ def buscar_recurso():
         return jsonify({"error": "Faltan datos de entrada"}), 400
 
     try:
-        # Leer el archivo Excel
+        # Leer el Excel
         df = pd.read_excel(EXCEL_PATH)
 
-        # Normalizar texto (quitar espacios y poner en minúsculas)
+        # Normalizar columnas para evitar errores por espacios y mayúsculas
         for col in df.columns[:4]:
             df[col] = df[col].astype(str).str.strip().str.lower()
 
-        # Obtener datos del estudiante
+        # Convertir los datos recibidos
         principio = data['principio'].strip().lower()
         entorno = data['entorno'].strip().lower()
         interes = data['interes'].strip().lower()
         modalidad = data['modalidad'].strip().lower()
 
-        # Filtrar el recurso correspondiente
+        # Filtrar coincidencias
         resultado = df[
             (df.iloc[:, 0] == principio) &
             (df.iloc[:, 1] == entorno) &
@@ -56,9 +56,9 @@ def buscar_recurso():
         return jsonify(recurso)
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Error interno: {str(e)}"}), 500
 
 
-# Este bloque solo se ejecuta en desarrollo local (no en Render)
+# Ejecutar localmente o en Render
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=10000)
