@@ -92,7 +92,7 @@ def registrar_respuesta():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/generar_analogias", methods=["POST"])
+@app.route("/api/generar_analogia", methods=["POST"])
 def generar_analogias():
     data = request.get_json()
     openai_api_key = os.getenv("OPENAI_API_KEY")
