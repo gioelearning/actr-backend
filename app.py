@@ -92,8 +92,8 @@ def registrar_respuesta():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/generar_analogia", methods=["POST"])
-def generar_analogia():
+@app.route("/api/generar_analogias", methods=["POST"])
+def generar_analogias():
     data = request.get_json()
     openai_api_key = os.getenv("OPENAI_API_KEY")
 
@@ -105,7 +105,7 @@ def generar_analogia():
     prompt = f"""
     Eres un asistente educativo. Genera una analogía clara y fácil de entender sobre el principio ISO "{data.get('principio')}".
     Contexto del estudiante: entorno = "{data.get('entorno')}", interés = "{data.get('interes')}", modalidad sensorial = "{data.get('modalidad')}".
-    Usa un lenguaje amigable y relacionado con el interés del estudiante.
+    Usa un lenguaje amigable, breve (máximo 5 líneas) y relacionado con el interés del estudiante.
     """
 
     try:
@@ -118,7 +118,26 @@ def generar_analogia():
             max_tokens=250
         )
 
-        analogia = response.choices[0].message.content.strip()
+        analogia = response.choices[0].message["content"].strip()
+
+        # Guardar en CSV
+        try:
+            with open(RESPUESTAS_FILE, mode="a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    data.get("nombre", ""),
+                    data.get("identificacion", ""),
+                    data.get("edad", ""),
+                    data.get("principio", ""),
+                    data.get("entorno", ""),
+                    data.get("interes", ""),
+                    data.get("modalidad", ""),
+                    "Analogía",
+                    analogia
+                ])
+        except Exception as csv_err:
+            print("Error guardando en CSV:", csv_err)
 
         return jsonify({"analogias": analogia})
     except Exception as e:
