@@ -1,211 +1,128 @@
-# app.py (completo - reemplaza/integra con tu versión actual)
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pandas as pd
-import os
 import unicodedata
-from datetime import datetime
 import csv
-
-# OpenAI client (usa la librería oficial)
+import os
+from datetime import datetime
 from openai import OpenAI
 
 app = Flask(__name__)
 CORS(app)
 
-# RUTAS DE DATOS
-BASE_DATA_DIR = "data"
-if not os.path.exists(BASE_DATA_DIR):
-    os.makedirs(BASE_DATA_DIR)
+# Cargar Excel y normalizar
+DATA_FILE = "data/Rutas_Completas_Principios_Contexto_Formato.xlsx"
 
-EXCEL_PATH = os.path.join(BASE_DATA_DIR, "Rutas_Completas_Principios_Contexto_Formato.xlsx")
-RESPUESTAS_CSV = os.path.join(BASE_DATA_DIR, "respuestas_estudiantes.csv")
-ANALOGIAS_CSV = os.path.join(BASE_DATA_DIR, "analogias_generadas.csv")
-
-# Normalización de texto (quita tildes, espacios y pasa a minúsculas)
-def normalizar(texto):
-    if not isinstance(texto, str):
-        texto = str(texto)
-    texto = texto.strip().lower()
-    texto = unicodedata.normalize('NFD', texto)
-    texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
+def normalizar_texto(texto):
+    if pd.isna(texto):
+        return ""
+    texto = str(texto).strip().lower()
+    texto = unicodedata.normalize("NFD", texto).encode("ascii", "ignore").decode("utf-8")
     return texto
 
+df = pd.read_excel(DATA_FILE)
+df.columns = [normalizar_texto(c) for c in df.columns]
+
+# Variables para columnas
+COL_PRINCIPIO = "principio iso"
+COL_ENTORNO = "entorno general"
+COL_INTERES = "interes vivencial"
+COL_MODALIDAD = "modalidad sensorial preferida"
+COL_TIPO = "ejemplo de formato"
+COL_LINK = "link"
+
+# Archivo CSV para respuestas
+RESPUESTAS_FILE = "data/respuestas_usuarios.csv"
+if not os.path.exists(RESPUESTAS_FILE):
+    with open(RESPUESTAS_FILE, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "fecha_hora", "nombre", "identificacion", "edad",
+            "principio", "entorno", "interes", "modalidad", "fase", "respuesta"
+        ])
+
 @app.route("/")
-def inicio():
+def home():
     return "✅ API ACTR-ANALOGIC en línea"
 
-# Endpoint existente para buscar recurso (se asume que ya tienes esta lógica)
 @app.route("/api/buscar_recurso", methods=["POST"])
 def buscar_recurso():
     data = request.get_json()
-    required_keys = ['principio', 'entorno', 'interes', 'modalidad']
-    if not all(k in data for k in required_keys):
-        return jsonify({"error": "Faltan datos de entrada"}), 400
-    try:
-        df = pd.read_excel(EXCEL_PATH)
-        # columnas claves según tu Excel
-        columnas_clave = [
-            'Principio ISO',
-            'Entorno General',
-            'Interés Vivencial',
-            'Modalidad Sensorial Preferida'
-        ]
-        for col in columnas_clave + ['Ejemplo de Formato', 'Link']:
-            if col not in df.columns:
-                return jsonify({"error": f"Falta la columna '{col}' en el Excel"}), 500
-        for col in columnas_clave:
-            df[col] = df[col].apply(normalizar)
+    principio = normalizar_texto(data.get("principio"))
+    entorno = normalizar_texto(data.get("entorno"))
+    interes = normalizar_texto(data.get("interes"))
+    modalidad = normalizar_texto(data.get("modalidad"))
 
-        principio = normalizar(data['principio'])
-        entorno = normalizar(data['entorno'])
-        interes = normalizar(data['interes'])
-        modalidad = normalizar(data['modalidad'])
+    filtro = df[
+        (df[COL_PRINCIPIO].apply(normalizar_texto) == principio) &
+        (df[COL_ENTORNO].apply(normalizar_texto) == entorno) &
+        (df[COL_INTERES].apply(normalizar_texto) == interes) &
+        (df[COL_MODALIDAD].apply(normalizar_texto) == modalidad)
+    ]
 
-        resultado = df[
-            (df['Principio ISO'] == principio) &
-            (df['Entorno General'] == entorno) &
-            (df['Interés Vivencial'] == interes) &
-            (df['Modalidad Sensorial Preferida'] == modalidad)
-        ]
+    if filtro.empty:
+        return jsonify({"error": "No se encontró recurso para esta combinación"}), 404
 
-        if resultado.empty:
-            return jsonify({"error": "No se encontró recurso para esta combinación"}), 404
+    fila = filtro.iloc[0]
+    return jsonify({
+        "tipo": fila[COL_TIPO],
+        "link": fila[COL_LINK]
+    })
 
-        recurso = {
-            "tipo": resultado.iloc[0]['Ejemplo de Formato'],
-            "link": resultado.iloc[0]['Link']
-        }
-        return jsonify(recurso)
-
-    except Exception as e:
-        return jsonify({"error": f"Error interno: {str(e)}"}), 500
-
-# Endpoint para registrar respuesta (actualizado para guardar datos personales y recurso)
 @app.route("/api/registrar_respuesta", methods=["POST"])
 def registrar_respuesta():
     data = request.get_json()
-    # Campos esperados (se requieren los personales y contexto)
-    required_fields = [
-        'nombre_completo', 'numero_identificacion', 'edad',
-        'principio', 'entorno', 'interes', 'modalidad',
-        'tipo_recurso', 'link_recurso', 'respuesta', 'fase'
-    ]
-    if not all(k in data for k in required_fields):
-        return jsonify({"error": "Datos incompletos para registrar respuesta"}), 400
+
     try:
-        nuevo_registro = {
-            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "nombre_completo": data["nombre_completo"],
-            "numero_identificacion": data["numero_identificacion"],
-            "edad": data["edad"],
-            "principio": data["principio"],
-            "entorno": data["entorno"],
-            "interes": data["interes"],
-            "modalidad": data["modalidad"],
-            "tipo_recurso": data["tipo_recurso"],
-            "link_recurso": data["link_recurso"],
-            "respuesta": data["respuesta"],
-            "fase": data["fase"]
-        }
-
-        archivo_nuevo = not os.path.exists(RESPUESTAS_CSV)
-        with open(RESPUESTAS_CSV, mode="a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=nuevo_registro.keys())
-            if archivo_nuevo:
-                writer.writeheader()
-            writer.writerow(nuevo_registro)
-
-        return jsonify({"mensaje": "Respuesta registrada exitosamente"})
+        with open(RESPUESTAS_FILE, mode="a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                data.get("nombre", ""),
+                data.get("identificacion", ""),
+                data.get("edad", ""),
+                data.get("principio", ""),
+                data.get("entorno", ""),
+                data.get("interes", ""),
+                data.get("modalidad", ""),
+                data.get("fase", ""),
+                data.get("respuesta", "")
+            ])
+        return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Endpoint para generar analogía con OpenAI (usa la plantilla del notebook)
 @app.route("/api/generar_analogia", methods=["POST"])
 def generar_analogia():
     data = request.get_json()
-    # Esperamos datos contextuales mínimos y el estilo opcional
-    required = ['nombre_completo','numero_identificacion','principio','entorno','interes','modalidad','tipo_recurso','link_recurso']
-    if not all(k in data for k in required):
-        return jsonify({"error": "Datos incompletos para generar analogía"}), 400
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+
+    if not openai_api_key:
+        return jsonify({"error": "No está configurada la API Key de OpenAI"}), 500
+
+    client = OpenAI(api_key=openai_api_key)
+
+    prompt = f"""
+    Eres un asistente educativo. Genera una analogía clara y fácil de entender sobre el principio ISO "{data.get('principio')}".
+    Contexto del estudiante: entorno = "{data.get('entorno')}", interés = "{data.get('interes')}", modalidad sensorial = "{data.get('modalidad')}".
+    Usa un lenguaje amigable y relacionado con el interés del estudiante.
+    """
 
     try:
-        # Construir prompt usando plantilla (adaptada desde el notebook)
-        principio = data['principio']
-        interes = data['interes']
-        entorno = data['entorno']
-        modalidad = data['modalidad']
-
-        # Si el cliente proporcionó un prompt base personalizado, podemos incluirlo
-        estilo = data.get('estilo', 'general')
-        # Plantilla: ajusta según lo que el cliente envíe
-        prompt = f"""
-Actúa como una experta en pedagogía y razonamiento analógico.
-Utiliza un enfoque de analogías contextualizadas.
-
-Dominio base (contexto conocido): {entorno}, con interés vivencial en {interes}.
-Dominio objetivo: el principio ISO "{principio}".
-Modalidad sensorial preferida: {modalidad}.
-
-Genera una analogía educativa clara, breve (máx 120-180 palabras),
-con correspondencias estructurales y un ejemplo práctico aplicable al contexto del estudiante.
-"""
-
-        # Obtener API key desde variables de entorno en Render
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            return jsonify({"error": "OpenAI API key no configurada en variables de entorno"}), 500
-
-        client = OpenAI(api_key=api_key)
-
-        # Llamada al endpoint de chat/completions (modelo configurable)
-        # Atención: el modelo y método pueden cambiar según la versión de la librería OpenAI
-        respuesta = client.chat.completions.create(
-            model="gpt-4",
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Eres una experta en pedagogía y razonamiento analógico."},
+                {"role": "system", "content": "Eres un experto en generar analogías educativas."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=400,
-            temperature=0.7
+            max_tokens=250
         )
 
-        analogia_generada = respuesta.choices[0].message.content.strip()
+        analogia = response.choices[0].message.content.strip()
 
-        # Guardar la analogía para auditoría
-        registro_analog = {
-            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "nombre_completo": data.get("nombre_completo", ""),
-            "numero_identificacion": data.get("numero_identificacion", ""),
-            "principio": principio,
-            "interes": interes,
-            "entorno": entorno,
-            "modalidad": modalidad,
-            "prompt": prompt,
-            "analogia": analogia_generada
-        }
-        archivo_nuevo = not os.path.exists(ANALOGIAS_CSV)
-        with open(ANALOGIAS_CSV, mode="a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=registro_analog.keys())
-            if archivo_nuevo:
-                writer.writeheader()
-            writer.writerow(registro_analog)
-
-        return jsonify({"analogia": analogia_generada})
-
+        return jsonify({"analogias": analogia})
     except Exception as e:
-        return jsonify({"error": f"Error al generar analogía: {str(e)}"}), 500
-
-# Endpoint admin para descargar CSV de respuestas (PROTEGIDO por ADMIN_KEY)
-@app.route("/admin/download_respuestas", methods=["GET"])
-def admin_download_respuestas():
-    key = request.args.get("key")
-    admin_key = os.environ.get("ADMIN_KEY")
-    if not admin_key or key != admin_key:
-        return ("Unauthorized", 401)
-    if not os.path.exists(RESPUESTAS_CSV):
-        return ("No hay datos", 404)
-    return send_file(RESPUESTAS_CSV, as_attachment=True)
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)
+    app.run(debug=True)
