@@ -138,6 +138,18 @@ def generar_analogia():
     except Exception as e:
         print("❌ [ERROR] Fallo en la llamada a OpenAI:", str(e))
         return jsonify({"error": f"Fallo al generar analogía: {str(e)}"}), 500
+    
+@app.route("/api/ver_respuestas", methods=["GET"])
+def ver_respuestas():
+    try:
+        if not os.path.exists(RESPUESTAS_FILE):
+            return jsonify({"respuestas": []})
+
+        df_respuestas = pd.read_csv(RESPUESTAS_FILE, encoding="utf-8")
+        return jsonify({"respuestas": df_respuestas.to_dict(orient="records")})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
