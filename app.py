@@ -92,7 +92,6 @@ def registrar_respuesta():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Forzando nuevo deploy en Render - 2025-08-12
 @app.route("/api/generar_analogia", methods=["POST"])
 def generar_analogia():
     print("📌 [LOG] Petición recibida en /api/generar_analogia")
@@ -100,15 +99,12 @@ def generar_analogia():
     print("📌 [LOG] Datos recibidos:", data)
 
     openai_api_key = os.getenv("OPENAI_API_KEY")
-
     if not openai_api_key or len(openai_api_key.strip()) == 0:
-        print("❌ [ERROR] No está configurada la API Key de OpenAI")
         return jsonify({"error": "No está configurada la API Key de OpenAI"}), 500
 
     try:
         client = OpenAI(api_key=openai_api_key)
     except Exception as e:
-        print("❌ [ERROR] No se pudo inicializar cliente OpenAI:", str(e))
         return jsonify({"error": "No se pudo inicializar cliente OpenAI"}), 500
 
     prompt = f"""
@@ -116,8 +112,6 @@ def generar_analogia():
     Contexto del estudiante: entorno = "{data.get('entorno')}", interés = "{data.get('interes')}", modalidad sensorial = "{data.get('modalidad')}".
     Usa un lenguaje amigable y relacionado con el interés del estudiante.
     """
-
-    print("📌 [LOG] Prompt enviado a OpenAI:", prompt)
 
     try:
         response = client.chat.completions.create(
@@ -127,16 +121,30 @@ def generar_analogia():
                 {"role": "user", "content": prompt}
             ],
             max_tokens=250,
-            timeout=15  # ⏳ Máximo 15 segundos de espera
+            timeout=15
         )
 
-        print("📌 [LOG] Respuesta recibida de OpenAI")
-
         analogia = response.choices[0].message.content.strip()
+
+        # Guardar en CSV
+        with open(RESPUESTAS_FILE, mode="a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                data.get("nombre", ""),
+                data.get("identificacion", ""),
+                data.get("edad", ""),
+                data.get("principio", ""),
+                data.get("entorno", ""),
+                data.get("interes", ""),
+                data.get("modalidad", ""),
+                "Analogías",
+                analogia
+            ])
+
         return jsonify({"analogias": analogia})
 
     except Exception as e:
-        print("❌ [ERROR] Fallo en la llamada a OpenAI:", str(e))
         return jsonify({"error": f"Fallo al generar analogía: {str(e)}"}), 500
     
 @app.route("/api/ver_respuestas", methods=["GET"])
