@@ -38,7 +38,8 @@ if not os.path.exists(RESPUESTAS_FILE):
         writer = csv.writer(f)
         writer.writerow([
             "fecha_hora", "nombre", "identificacion", "edad",
-            "principio", "entorno", "interes", "modalidad", "fase", "respuesta"
+            "principio", "entorno", "interes", "modalidad", "fase", "respuesta",
+            "pregunta1", "pregunta2", "pregunta3", "pregunta4", "pregunta5"
         ])
 
 @app.route("/")
@@ -86,7 +87,12 @@ def registrar_respuesta():
                 data.get("interes", ""),
                 data.get("modalidad", ""),
                 data.get("fase", ""),
-                data.get("respuesta", "")
+                data.get("respuesta", ""),
+                data.get("pregunta1", ""),
+                data.get("pregunta2", ""),
+                data.get("pregunta3", ""),
+                data.get("pregunta4", ""),
+                data.get("pregunta5", "")
             ])
         return jsonify({"status": "ok"})
     except Exception as e:
@@ -126,7 +132,6 @@ def generar_analogia():
 
         analogia = response.choices[0].message.content.strip()
 
-        # Guardar en CSV
         with open(RESPUESTAS_FILE, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -139,24 +144,78 @@ def generar_analogia():
                 data.get("interes", ""),
                 data.get("modalidad", ""),
                 "Analogías",
-                analogia
+                analogia, "", "", "", "", ""
             ])
 
         return jsonify({"analogias": analogia})
 
     except Exception as e:
         return jsonify({"error": f"Fallo al generar analogía: {str(e)}"}), 500
-    
+
 @app.route("/api/ver_respuestas", methods=["GET"])
 def ver_respuestas():
     try:
         if not os.path.exists(RESPUESTAS_FILE):
             return jsonify({"respuestas": []})
 
-        df_respuestas = pd.read_csv(RESPUESTAS_FILE, encoding="utf-8")
+        df_respuestas = pd.read_csv(RESPUESTAS_FILE, encoding="utf-8").fillna("")
 
-        # Reemplazar NaN por cadena vacía
-        df_respuestas = df_respuestas.fillna("")
+        # Calcular métricas para fase 6
+        def calcular_fase6(row):
+            RC = lambda_RA = lambda_CSD = Gi = Ci = None
+
+            if row["fase"] == "Fase 6":
+                # RC
+                if row["pregunta1"] == "Sí":
+                    RC = 0.9
+                elif row["pregunta1"] == "Regular":
+                    RC = 0.6
+                elif row["pregunta1"] == "No":
+                    RC = 0.3
+
+                # λ_RA
+                if row["pregunta2"] == "Generé mi propia analogía y la comparé":
+                    lambda_RA = 0.3
+                elif row["pregunta2"] == "Comprendí y usé la analogía dada":
+                    lambda_RA = 0.2
+                elif row["pregunta2"] == "Leí la analogía, pero no la entendí bien":
+                    lambda_RA = 0.1
+                elif row["pregunta2"] == "No usé ninguna analogía":
+                    lambda_RA = 0.0
+
+                # λ_CSD
+                acciones = str(row["pregunta3"]).split(";")
+                lambda_CSD = min(sum(0.1 for acc in acciones if acc.strip()), 0.3)
+
+                # Gi
+                if row["pregunta4"] == "Mucho":
+                    Gi = 0.9
+                elif row["pregunta4"] == "Algo":
+                    Gi = 0.7
+                elif row["pregunta4"] == "Poco":
+                    Gi = 0.4
+                elif row["pregunta4"] == "Nada":
+                    Gi = 0.1
+
+                # Ci
+                if row["pregunta5"] == "Muy fácil":
+                    Ci = 0.1
+                elif row["pregunta5"] == "Manejable":
+                    Ci = 0.3
+                elif row["pregunta5"] == "Difícil":
+                    Ci = 0.6
+                elif row["pregunta5"] == "Muy difícil":
+                    Ci = 0.9
+
+                if None not in (RC, lambda_RA, lambda_CSD, Gi, Ci):
+                    resultado = ((RC + lambda_RA + lambda_CSD) * Gi) / Ci
+                    return RC, lambda_RA, lambda_CSD, Gi, Ci, resultado
+
+            return RC, lambda_RA, lambda_CSD, Gi, Ci, None
+
+        df_respuestas[["RC", "lambda_RA", "lambda_CSD", "Gi", "Ci", "resultado"]] = df_respuestas.apply(
+            lambda row: pd.Series(calcular_fase6(row)), axis=1
+        )
 
         return jsonify({"respuestas": df_respuestas.to_dict(orient="records")})
     except Exception as e:
@@ -167,8 +226,6 @@ def descargar_respuestas():
     try:
         if not os.path.exists(RESPUESTAS_FILE):
             return "No hay datos", 404
-
-        # Enviar CSV como descarga
         return app.response_class(
             open(RESPUESTAS_FILE, encoding="utf-8").read(),
             mimetype="text/csv",
