@@ -10,9 +10,18 @@ from openai import OpenAI
 app = Flask(__name__)
 CORS(app)
 
-# Cargar Excel y normalizar
+# === Configuración ===
 DATA_FILE = "data/Rutas_Completas_Principios_Contexto_Formato.xlsx"
+RESPUESTAS_FILE = "data/respuestas_usuarios.csv"
 
+COLUMNAS_RESPUESTAS = [
+    "fecha_hora", "nombre", "identificacion", "edad",
+    "principio", "entorno", "interes", "modalidad",
+    "fase", "respuesta",
+    "RC", "lambdaRA", "lambdaCSD", "Gi", "Ci", "RCplus", "Ui", "Ppi"
+]
+
+# === Funciones auxiliares ===
 def normalizar_texto(texto):
     if pd.isna(texto):
         return ""
@@ -20,10 +29,10 @@ def normalizar_texto(texto):
     texto = unicodedata.normalize("NFD", texto).encode("ascii", "ignore").decode("utf-8")
     return texto
 
+# === Cargar Excel ===
 df = pd.read_excel(DATA_FILE)
 df.columns = [normalizar_texto(c) for c in df.columns]
 
-# Variables para columnas
 COL_PRINCIPIO = "principio iso"
 COL_ENTORNO = "entorno general"
 COL_INTERES = "interes vivencial"
@@ -31,18 +40,24 @@ COL_MODALIDAD = "modalidad sensorial preferida"
 COL_TIPO = "ejemplo de formato"
 COL_LINK = "link"
 
-# Archivo CSV para respuestas
-RESPUESTAS_FILE = "data/respuestas_usuarios.csv"
-if not os.path.exists(RESPUESTAS_FILE):
-    with open(RESPUESTAS_FILE, mode="w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "fecha_hora", "nombre", "identificacion", "edad",
-            "principio", "entorno", "interes", "modalidad",
-            "fase", "respuesta",
-            "RC", "lambdaRA", "lambdaCSD", "Gi", "Ci", "RCplus", "Ui", "Ppi"
-        ])
+# === Verificar o crear CSV ===
+def inicializar_csv():
+    if not os.path.exists(RESPUESTAS_FILE):
+        os.makedirs(os.path.dirname(RESPUESTAS_FILE), exist_ok=True)
+        with open(RESPUESTAS_FILE, mode="w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(COLUMNAS_RESPUESTAS)
+    else:
+        # Verificar columnas
+        df_csv = pd.read_csv(RESPUESTAS_FILE, encoding="utf-8")
+        if list(df_csv.columns) != COLUMNAS_RESPUESTAS:
+            with open(RESPUESTAS_FILE, mode="w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(COLUMNAS_RESPUESTAS)
 
+inicializar_csv()
+
+# === Rutas ===
 @app.route("/")
 def home():
     return "✅ API ACTR-ANALOGIC en línea"
@@ -164,7 +179,6 @@ def ver_respuestas():
             return jsonify({"respuestas": []})
 
         df_respuestas = pd.read_csv(RESPUESTAS_FILE, encoding="utf-8").fillna("")
-
         return jsonify({"respuestas": df_respuestas.to_dict(orient="records")})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
