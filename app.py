@@ -1,3 +1,4 @@
+#se supone que esta verisón funciona
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pandas as pd
@@ -10,18 +11,15 @@ from openai import OpenAI
 app = Flask(__name__)
 CORS(app)
 
-# === Configuración ===
+# ------------------------
+# Configuración de archivos
+# ------------------------
 DATA_FILE = "data/Rutas_Completas_Principios_Contexto_Formato.xlsx"
 RESPUESTAS_FILE = "data/respuestas_usuarios.csv"
 
-COLUMNAS_RESPUESTAS = [
-    "fecha_hora", "nombre", "identificacion", "edad",
-    "principio", "entorno", "interes", "modalidad",
-    "fase", "respuesta",
-    "RC", "lambdaRA", "lambdaCSD", "Gi", "Ci", "RCplus", "Ui", "Ppi"
-]
-
-# === Funciones auxiliares ===
+# ------------------------
+# Normalizar texto
+# ------------------------
 def normalizar_texto(texto):
     if pd.isna(texto):
         return ""
@@ -29,7 +27,9 @@ def normalizar_texto(texto):
     texto = unicodedata.normalize("NFD", texto).encode("ascii", "ignore").decode("utf-8")
     return texto
 
-# === Cargar Excel ===
+# ------------------------
+# Cargar Excel de rutas
+# ------------------------
 df = pd.read_excel(DATA_FILE)
 df.columns = [normalizar_texto(c) for c in df.columns]
 
@@ -40,24 +40,26 @@ COL_MODALIDAD = "modalidad sensorial preferida"
 COL_TIPO = "ejemplo de formato"
 COL_LINK = "link"
 
-# === Verificar o crear CSV ===
-def inicializar_csv():
-    if not os.path.exists(RESPUESTAS_FILE):
-        os.makedirs(os.path.dirname(RESPUESTAS_FILE), exist_ok=True)
-        with open(RESPUESTAS_FILE, mode="w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(COLUMNAS_RESPUESTAS)
-    else:
-        # Verificar columnas
-        df_csv = pd.read_csv(RESPUESTAS_FILE, encoding="utf-8")
-        if list(df_csv.columns) != COLUMNAS_RESPUESTAS:
-            with open(RESPUESTAS_FILE, mode="w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(COLUMNAS_RESPUESTAS)
+# ------------------------
+# Columnas fijas del CSV
+# ------------------------
+COLUMNAS_RESPUESTAS = [
+    "fecha_hora", "nombre", "identificacion", "edad",
+    "principio", "entorno", "interes", "modalidad",
+    "fase", "respuesta",
+    "RC", "lambdaRA", "lambdaCSD", "Gi", "Ci", "RCplus", "Ui", "Ppi"
+]
 
-inicializar_csv()
+# Crear CSV vacío si no existe
+os.makedirs("data", exist_ok=True)
+if not os.path.exists(RESPUESTAS_FILE):
+    with open(RESPUESTAS_FILE, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNAS_RESPUESTAS, quoting=csv.QUOTE_ALL)
+        writer.writeheader()
 
-# === Rutas ===
+# ------------------------
+# Rutas API
+# ------------------------
 @app.route("/")
 def home():
     return "✅ API ACTR-ANALOGIC en línea"
@@ -90,48 +92,39 @@ def buscar_recurso():
 def registrar_respuesta():
     data = request.get_json()
 
+    print("📩 [DEBUG] Datos recibidos en /api/registrar_respuesta:")
+    for k, v in data.items():
+        print(f"   {k}: {v}")
+
     try:
+        # Agregar fecha/hora actual si no viene
+        data["fecha_hora"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Asegurar que todas las columnas existan
+        for col in COLUMNAS_RESPUESTAS:
+            if col not in data:
+                data[col] = ""
+
+        # Guardar en CSV
         with open(RESPUESTAS_FILE, mode="a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                data.get("nombre", ""),
-                data.get("identificacion", ""),
-                data.get("edad", ""),
-                data.get("principio", ""),
-                data.get("entorno", ""),
-                data.get("interes", ""),
-                data.get("modalidad", ""),
-                data.get("fase", ""),
-                data.get("respuesta", ""),
-                data.get("RC", ""),
-                data.get("lambdaRA", ""),
-                data.get("lambdaCSD", ""),
-                data.get("Gi", ""),
-                data.get("Ci", ""),
-                data.get("RCplus", ""),
-                data.get("Ui", ""),
-                data.get("Ppi", "")
-            ])
+            writer = csv.DictWriter(f, fieldnames=COLUMNAS_RESPUESTAS, quoting=csv.QUOTE_ALL)
+            writer.writerow(data)
+
+        print("✅ [DEBUG] Respuesta guardada correctamente en CSV.")
         return jsonify({"status": "ok"})
+
     except Exception as e:
+        print("❌ [ERROR] No se pudo guardar la respuesta:", e)
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/generar_analogia", methods=["POST"])
 def generar_analogia():
-    print("📌 [LOG] Petición recibida en /api/generar_analogia")
     data = request.get_json()
-    print("📌 [LOG] Datos recibidos:", data)
-
     openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key or len(openai_api_key.strip()) == 0:
+    if not openai_api_key:
         return jsonify({"error": "No está configurada la API Key de OpenAI"}), 500
 
-    try:
-        client = OpenAI(api_key=openai_api_key)
-    except Exception as e:
-        return jsonify({"error": "No se pudo inicializar cliente OpenAI"}), 500
-
+    client = OpenAI(api_key=openai_api_key)
     prompt = f"""
     Eres un asistente educativo. Genera una analogía clara y fácil de entender sobre el principio ISO "{data.get('principio')}".
     Contexto del estudiante: entorno = "{data.get('entorno')}", interés = "{data.get('interes')}", modalidad sensorial = "{data.get('modalidad')}".
@@ -151,21 +144,24 @@ def generar_analogia():
 
         analogia = response.choices[0].message.content.strip()
 
+        # Guardar en CSV
+        fila = {col: "" for col in COLUMNAS_RESPUESTAS}
+        fila.update({
+            "fecha_hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "nombre": data.get("nombre", ""),
+            "identificacion": data.get("identificacion", ""),
+            "edad": data.get("edad", ""),
+            "principio": data.get("principio", ""),
+            "entorno": data.get("entorno", ""),
+            "interes": data.get("interes", ""),
+            "modalidad": data.get("modalidad", ""),
+            "fase": "Analogías",
+            "respuesta": analogia
+        })
+
         with open(RESPUESTAS_FILE, mode="a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                data.get("nombre", ""),
-                data.get("identificacion", ""),
-                data.get("edad", ""),
-                data.get("principio", ""),
-                data.get("entorno", ""),
-                data.get("interes", ""),
-                data.get("modalidad", ""),
-                "Analogías",
-                analogia,
-                "", "", "", "", "", "", "", ""
-            ])
+            writer = csv.DictWriter(f, fieldnames=COLUMNAS_RESPUESTAS, quoting=csv.QUOTE_ALL)
+            writer.writerow(fila)
 
         return jsonify({"analogias": analogia})
 
@@ -180,11 +176,12 @@ def ver_respuestas():
 
         df_respuestas = pd.read_csv(RESPUESTAS_FILE, encoding="utf-8").fillna("")
         return jsonify({"respuestas": df_respuestas.to_dict(orient="records")})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/descargar_respuestas", methods=["GET"])
-def descargar_respuestas():
+@app.route("/api/descargar_excel", methods=["GET"])
+def descargar_excel():
     try:
         if not os.path.exists(RESPUESTAS_FILE):
             return "No hay datos", 404
