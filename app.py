@@ -10,9 +10,15 @@ from openai import OpenAI
 app = Flask(__name__)
 CORS(app)
 
-# Cargar Excel y normalizar
+# ------------------------------
+# Configuración de rutas de datos
+# ------------------------------
 DATA_FILE = "data/Rutas_Completas_Principios_Contexto_Formato.xlsx"
+RESPUESTAS_FILE = "data/respuestas_usuarios.csv"
 
+# ------------------------------
+# Funciones auxiliares
+# ------------------------------
 def normalizar_texto(texto):
     if pd.isna(texto):
         return ""
@@ -20,10 +26,12 @@ def normalizar_texto(texto):
     texto = unicodedata.normalize("NFD", texto).encode("ascii", "ignore").decode("utf-8")
     return texto
 
+# ------------------------------
+# Cargar base de principios ISO
+# ------------------------------
 df = pd.read_excel(DATA_FILE)
 df.columns = [normalizar_texto(c) for c in df.columns]
 
-# Variables para columnas
 COL_PRINCIPIO = "principio iso"
 COL_ENTORNO = "entorno general"
 COL_INTERES = "interes vivencial"
@@ -31,17 +39,22 @@ COL_MODALIDAD = "modalidad sensorial preferida"
 COL_TIPO = "ejemplo de formato"
 COL_LINK = "link"
 
-# Archivo CSV para respuestas
-RESPUESTAS_FILE = "data/respuestas_usuarios.csv"
+# ------------------------------
+# Crear CSV si no existe
+# ------------------------------
 if not os.path.exists(RESPUESTAS_FILE):
     with open(RESPUESTAS_FILE, mode="w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([
             "fecha_hora", "nombre", "identificacion", "edad",
-            "principio", "entorno", "interes", "modalidad", "fase", "respuesta",
-            "pregunta1", "pregunta2", "pregunta3", "pregunta4", "pregunta5"
+            "principio", "entorno", "interes", "modalidad",
+            "fase", "respuesta",
+            "RC", "lambdaRA", "lambdaCSD", "Gi", "Ci", "RCplus", "Ui", "Ppi"
         ])
 
+# ------------------------------
+# Rutas API
+# ------------------------------
 @app.route("/")
 def home():
     return "✅ API ACTR-ANALOGIC en línea"
@@ -72,8 +85,10 @@ def buscar_recurso():
 
 @app.route("/api/registrar_respuesta", methods=["POST"])
 def registrar_respuesta():
+    """
+    Guarda cualquier respuesta (fases 1 a 5)
+    """
     data = request.get_json()
-
     try:
         with open(RESPUESTAS_FILE, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -88,50 +103,59 @@ def registrar_respuesta():
                 data.get("modalidad", ""),
                 data.get("fase", ""),
                 data.get("respuesta", ""),
-                data.get("pregunta1", ""),
-                data.get("pregunta2", ""),
-                data.get("pregunta3", ""),
-                data.get("pregunta4", ""),
-                data.get("pregunta5", "")
+                data.get("RC", ""),
+                data.get("lambdaRA", ""),
+                data.get("lambdaCSD", ""),
+                data.get("Gi", ""),
+                data.get("Ci", ""),
+                data.get("RCplus", ""),
+                data.get("Ui", ""),
+                data.get("Ppi", "")
             ])
         return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/generar_analogia", methods=["POST"])
-def generar_analogia():
-    print("📌 [LOG] Petición recibida en /api/generar_analogia")
-    data = request.get_json()
-    print("📌 [LOG] Datos recibidos:", data)
-
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key or len(openai_api_key.strip()) == 0:
-        return jsonify({"error": "No está configurada la API Key de OpenAI"}), 500
-
-    try:
-        client = OpenAI(api_key=openai_api_key)
-    except Exception as e:
-        return jsonify({"error": "No se pudo inicializar cliente OpenAI"}), 500
-
-    prompt = f"""
-    Eres un asistente educativo. Genera una analogía clara y fácil de entender sobre el principio ISO "{data.get('principio')}".
-    Contexto del estudiante: entorno = "{data.get('entorno')}", interés = "{data.get('interes')}", modalidad sensorial = "{data.get('modalidad')}".
-    Usa un lenguaje amigable y relacionado con el interés del estudiante.
+@app.route("/api/fase6", methods=["POST"])
+def fase6():
     """
+    Procesa la Evaluación Cognitiva del Aprendizaje
+    Calcula y guarda los valores en el CSV
+    """
+    data = request.get_json()
 
+    # Mapas de valores según el cliente
+    mapa_RC = {"Si": 0.9, "Regular": 0.6, "No": 0.3}
+    mapa_lambdaRA = {
+        "Genere": 0.3,
+        "Comprendi": 0.2,
+        "Lei": 0.1,
+        "No use": 0.0
+    }
+    mapa_Gi = {"Mucho": 0.9, "Algo": 0.7, "Poco": 0.4, "Nada": 0.1}
+    mapa_Ci = {"Muy facil": 0.1, "Manejable": 0.3, "Dificil": 0.6, "Muy dificil": 0.9}
+    mapa_CSD = {
+        "Consulté con el chatbot": 0.1,
+        "Leí comentarios de compañeros": 0.1,
+        "Recibí retroalimentación del docente": 0.1,
+        "Participé en discusión grupal": 0.1,
+        "Comparé mi respuesta con otra": 0.1
+    }
+
+    # Cálculos
+    RC = mapa_RC.get(data.get("preg1", ""), "")
+    lambdaRA = mapa_lambdaRA.get(data.get("preg2", ""), "")
+    lambdaCSD = sum(mapa_CSD.get(a, 0) for a in data.get("preg3", []))
+    Gi = mapa_Gi.get(data.get("preg4", ""), "")
+    Ci = mapa_Ci.get(data.get("preg5", ""), "")
+
+    # Fórmulas finales
+    RCplus = round(RC + lambdaRA + lambdaCSD, 3) if RC != "" else ""
+    Ui = round(Gi - Ci, 3) if Gi != "" and Ci != "" else ""
+    Ppi = round(RCplus * Ui, 3) if RCplus != "" and Ui != "" else ""
+
+    # Guardar en CSV
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Eres un experto en generar analogías educativas."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=250,
-            timeout=15
-        )
-
-        analogia = response.choices[0].message.content.strip()
-
         with open(RESPUESTAS_FILE, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -143,10 +167,39 @@ def generar_analogia():
                 data.get("entorno", ""),
                 data.get("interes", ""),
                 data.get("modalidad", ""),
-                "Analogías",
-                analogia, "", "", "", "", ""
+                "Evaluación Cognitiva",
+                data.get("respuesta", ""),
+                RC, lambdaRA, lambdaCSD, Gi, Ci, RCplus, Ui, Ppi
             ])
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
+@app.route("/api/generar_analogia", methods=["POST"])
+def generar_analogia():
+    data = request.get_json()
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        return jsonify({"error": "No está configurada la API Key de OpenAI"}), 500
+
+    try:
+        client = OpenAI(api_key=openai_api_key)
+        prompt = f"""
+        Eres un asistente educativo. Genera una analogía clara y fácil de entender sobre el principio ISO "{data.get('principio')}".
+        Contexto del estudiante: entorno = "{data.get('entorno')}", interés = "{data.get('interes')}", modalidad sensorial = "{data.get('modalidad')}".
+        Usa un lenguaje amigable y relacionado con el interés del estudiante.
+        """
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Eres un experto en generar analogías educativas."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=250
+        )
+
+        analogia = response.choices[0].message.content.strip()
         return jsonify({"analogias": analogia})
 
     except Exception as e:
@@ -158,74 +211,18 @@ def ver_respuestas():
         if not os.path.exists(RESPUESTAS_FILE):
             return jsonify({"respuestas": []})
 
-        df_respuestas = pd.read_csv(RESPUESTAS_FILE, encoding="utf-8").fillna("")
-
-        # Calcular métricas para fase 6
-        def calcular_fase6(row):
-            RC = lambda_RA = lambda_CSD = Gi = Ci = None
-
-            if row["fase"] == "Fase 6":
-                # RC
-                if row["pregunta1"] == "Sí":
-                    RC = 0.9
-                elif row["pregunta1"] == "Regular":
-                    RC = 0.6
-                elif row["pregunta1"] == "No":
-                    RC = 0.3
-
-                # λ_RA
-                if row["pregunta2"] == "Generé mi propia analogía y la comparé":
-                    lambda_RA = 0.3
-                elif row["pregunta2"] == "Comprendí y usé la analogía dada":
-                    lambda_RA = 0.2
-                elif row["pregunta2"] == "Leí la analogía, pero no la entendí bien":
-                    lambda_RA = 0.1
-                elif row["pregunta2"] == "No usé ninguna analogía":
-                    lambda_RA = 0.0
-
-                # λ_CSD
-                acciones = str(row["pregunta3"]).split(";")
-                lambda_CSD = min(sum(0.1 for acc in acciones if acc.strip()), 0.3)
-
-                # Gi
-                if row["pregunta4"] == "Mucho":
-                    Gi = 0.9
-                elif row["pregunta4"] == "Algo":
-                    Gi = 0.7
-                elif row["pregunta4"] == "Poco":
-                    Gi = 0.4
-                elif row["pregunta4"] == "Nada":
-                    Gi = 0.1
-
-                # Ci
-                if row["pregunta5"] == "Muy fácil":
-                    Ci = 0.1
-                elif row["pregunta5"] == "Manejable":
-                    Ci = 0.3
-                elif row["pregunta5"] == "Difícil":
-                    Ci = 0.6
-                elif row["pregunta5"] == "Muy difícil":
-                    Ci = 0.9
-
-                if None not in (RC, lambda_RA, lambda_CSD, Gi, Ci):
-                    resultado = ((RC + lambda_RA + lambda_CSD) * Gi) / Ci
-                    return RC, lambda_RA, lambda_CSD, Gi, Ci, resultado
-
-            return RC, lambda_RA, lambda_CSD, Gi, Ci, None
-
-        df_respuestas[["RC", "lambda_RA", "lambda_CSD", "Gi", "Ci", "resultado"]] = df_respuestas.apply(
-            lambda row: pd.Series(calcular_fase6(row)), axis=1
-        )
-
+        df_respuestas = pd.read_csv(RESPUESTAS_FILE, encoding="utf-8")
+        df_respuestas = df_respuestas.fillna("")
         return jsonify({"respuestas": df_respuestas.to_dict(orient="records")})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/descargar_respuestas", methods=["GET"])
-def descargar_respuestas():
+@app.route("/api/descargar_excel", methods=["GET"])
+def descargar_excel():
     try:
         if not os.path.exists(RESPUESTAS_FILE):
             return "No hay datos", 404
+
         return app.response_class(
             open(RESPUESTAS_FILE, encoding="utf-8").read(),
             mimetype="text/csv",
@@ -234,6 +231,9 @@ def descargar_respuestas():
     except Exception as e:
         return str(e), 500
 
+# ------------------------------
+# Ejecutar servidor
+# ------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
