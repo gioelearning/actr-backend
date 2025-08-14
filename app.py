@@ -10,11 +10,9 @@ from openai import OpenAI
 app = Flask(__name__)
 CORS(app)
 
-# Ruta de archivo de datos
+# Cargar Excel y normalizar
 DATA_FILE = "data/Rutas_Completas_Principios_Contexto_Formato.xlsx"
-RESPUESTAS_FILE = "data/respuestas_usuarios.csv"
 
-# Normalización de texto
 def normalizar_texto(texto):
     if pd.isna(texto):
         return ""
@@ -22,11 +20,10 @@ def normalizar_texto(texto):
     texto = unicodedata.normalize("NFD", texto).encode("ascii", "ignore").decode("utf-8")
     return texto
 
-# Cargar Excel
 df = pd.read_excel(DATA_FILE)
 df.columns = [normalizar_texto(c) for c in df.columns]
 
-# Variables de columnas
+# Variables para columnas
 COL_PRINCIPIO = "principio iso"
 COL_ENTORNO = "entorno general"
 COL_INTERES = "interes vivencial"
@@ -34,31 +31,21 @@ COL_MODALIDAD = "modalidad sensorial preferida"
 COL_TIPO = "ejemplo de formato"
 COL_LINK = "link"
 
-# Crear CSV si no existe
-def crear_csv():
+# Archivo CSV para respuestas
+RESPUESTAS_FILE = "data/respuestas_usuarios.csv"
+if not os.path.exists(RESPUESTAS_FILE):
     with open(RESPUESTAS_FILE, mode="w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([
             "fecha_hora", "nombre", "identificacion", "edad",
-            "principio", "entorno", "interes", "modalidad", "fase", "respuesta",
+            "principio", "entorno", "interes", "modalidad",
+            "fase", "respuesta",
             "RC", "lambdaRA", "lambdaCSD", "Gi", "Ci", "RCplus", "Ui", "Ppi"
         ])
-
-if not os.path.exists(RESPUESTAS_FILE):
-    crear_csv()
 
 @app.route("/")
 def home():
     return "✅ API ACTR-ANALOGIC en línea"
-
-# 🔹 Endpoint para resetear el CSV
-@app.route("/api/reset_respuestas", methods=["POST"])
-def reset_respuestas():
-    try:
-        crear_csv()
-        return jsonify({"status": "ok", "mensaje": "Archivo de respuestas reiniciado"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/buscar_recurso", methods=["POST"])
 def buscar_recurso():
@@ -117,15 +104,17 @@ def registrar_respuesta():
 
 @app.route("/api/generar_analogia", methods=["POST"])
 def generar_analogia():
+    print("📌 [LOG] Petición recibida en /api/generar_analogia")
     data = request.get_json()
+    print("📌 [LOG] Datos recibidos:", data)
 
     openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key:
+    if not openai_api_key or len(openai_api_key.strip()) == 0:
         return jsonify({"error": "No está configurada la API Key de OpenAI"}), 500
 
     try:
         client = OpenAI(api_key=openai_api_key)
-    except Exception:
+    except Exception as e:
         return jsonify({"error": "No se pudo inicializar cliente OpenAI"}), 500
 
     prompt = f"""
@@ -175,6 +164,7 @@ def ver_respuestas():
             return jsonify({"respuestas": []})
 
         df_respuestas = pd.read_csv(RESPUESTAS_FILE, encoding="utf-8").fillna("")
+
         return jsonify({"respuestas": df_respuestas.to_dict(orient="records")})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
