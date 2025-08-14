@@ -154,10 +154,28 @@ def ver_respuestas():
             return jsonify({"respuestas": []})
 
         df_respuestas = pd.read_csv(RESPUESTAS_FILE, encoding="utf-8")
+
+        # Reemplazar NaN por cadena vacía
+        df_respuestas = df_respuestas.fillna("")
+
         return jsonify({"respuestas": df_respuestas.to_dict(orient="records")})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/descargar_respuestas", methods=["GET"])
+def descargar_respuestas():
+    try:
+        if not os.path.exists(RESPUESTAS_FILE):
+            return "No hay datos", 404
+
+        # Enviar CSV como descarga
+        return app.response_class(
+            open(RESPUESTAS_FILE, encoding="utf-8").read(),
+            mimetype="text/csv",
+            headers={"Content-Disposition": "attachment;filename=respuestas_usuarios.csv"}
+        )
+    except Exception as e:
+        return str(e), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
